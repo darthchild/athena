@@ -37,8 +37,6 @@ public class RateLimiterFilter implements Filter {
                 .orElseThrow(() -> new IllegalArgumentException("User-ID header is missing or invalid."));
 
 
-
-
         // Exclude H2 console from rate limiting
         if (requestURI.contains("/h2-console")) {
             chain.doFilter(request, response); // Skip rate limiting
@@ -47,7 +45,9 @@ public class RateLimiterFilter implements Filter {
 
         // Check if the User exists in the DB
         if(!userService.doesUserExist(userId)){
-            httpResponse.setStatus(404); // HTTP 429 Too Many Requests
+
+            // Handling USER NOT FOUND error
+            httpResponse.setStatus(404);
             httpResponse.setContentType("application/json");
             httpResponse.getWriter().write("{ " +
                     "\"status\" : 404," +
@@ -62,7 +62,7 @@ public class RateLimiterFilter implements Filter {
         // Rate Limiting
         if (!rateLimiterService.isAllowed(userId)) {
 
-            // Handle rate limit exceeded
+            // Handling RATE LIMIT EXCEEDED error
             httpResponse.setStatus(429); // HTTP 429 Too Many Requests
             httpResponse.setContentType("application/json");
             httpResponse.getWriter().write("{ " +

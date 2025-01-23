@@ -1,57 +1,67 @@
 package com.en.athena.services;
 
-import com.en.athena.repositories.UserRepository;
 import org.springframework.stereotype.Service;
-import java.time.Instant;
-import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import io.github.bucket4j.Bucket;
+import io.github.bucket4j.Bucket4j;
+import io.github.bucket4j.Bandwidth;
+import io.github.bucket4j.Refill;
+import org.springframework.web.client.RestTemplate;
+
+import java.time.Duration;
 
 @Service
 public class RateLimiterService {
 
-    // Maximum requests allowed per window
-    private final int REQUEST_LIMIT = 3;
+    private final Map<Long, Bucket> userBuckets = new ConcurrentHashMap<>();
 
-    // Window size in milliseconds
-    private final long WINDOW_SIZE = 20 * 1000;
+    private final RestTemplate restTemplate;
 
-    private final Map<Long, Window> userRateLimitMap = new HashMap<>();
-
-    public boolean isAllowed(Long userId) {
-        long currentTime = Instant.now().toEpochMilli();
-        Window window = userRateLimitMap.getOrDefault(userId, new Window(0, currentTime));
-
-
-
-        // Check if the current time has exceeded the window size
-        if (currentTime - window.startTime >= WINDOW_SIZE) {
-            // Reset the window
-            window.count = 1;
-            window.startTime = currentTime;
-            userRateLimitMap.put(userId, window);
-            return true;
-        }
-
-        // Check if the request count exceeds the limit
-        if (window.count < REQUEST_LIMIT) {
-            window.count++;
-            userRateLimitMap.put(userId, window);
-            return true;
-        }
-
-        // Reject the request
-        return false;
+    public RateLimiterService(RestTemplate restTemplate) {
+        this.restTemplate = restTemplate;
     }
 
-    // Inner class to represent the window for each user
-    private static class Window {
-        int count; // Number of requests
-        long startTime; // Start time of the window
+    // Calls Flask API
+    public Map<String, Object> fetchRateLimitConfig() {
+        String url = "http://localhost:5000/get-ratelimit";
 
-        public Window(int count, long startTime) {
-            this.count = count;
-            this.startTime = startTime;
+        try {
+            return restTemplate.getForObject(url, Map.class);
+        } catch (Exception e) {
+            // Log the error
+            System.err.println("Error fetching rate limit from external API: " + e.getMessage());
+
+            // Fallback to static rate limits
+            return Map.of(
+                    "capacity", 3,
+                    "refillTokens", 1,
+                    "refillDuration", 10
+            );
         }
+    }
+
+    // Create a new bucket
+    private Bucket createNewBucket(long capacity, long refillTokens, Duration refillDuration) {
+        Bandwidth limit = Bandwidth.classic(capacity, Refill.intervally(refillTokens, refillDuration));
+        return Bucket4j.builder().addLimit(limit).build();
+    }
+
+    // Fetch or create new bucket for given userId
+    public Bucket resolveBucket(Long userId) {
+        Map<String, Object> config = fetchRateLimitConfig();
+        int capacity = (int) config.get("capacity");
+        int refillTokens = (int) config.get("refillTokens");
+        int refillDuration = (int) config.get("refillDuration");
+
+        return userBuckets.computeIfAbsent(userId, id ->
+                createNewBucket(capacity, refillTokens, Duration.ofSeconds(refillDuration))
+        );
+    }
+
+    // Check if the request is allowed
+    public boolean isAllowed(Long userId) {
+        Bucket bucket = resolveBucket(userId);
+        return bucket.tryConsume(1);
     }
 }

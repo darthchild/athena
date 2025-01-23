@@ -9,6 +9,8 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.util.Map;
+
 @RestController
 public class MainController {
 
@@ -38,5 +40,11 @@ public class MainController {
     public ResponseEntity<?> testApi(@PathVariable("id") Long userId) {
         UserDTO user = userService.getUser(userId);
         return ResponseEntity.ok(user);
+    }
+
+    /** For Testing Flask API **/
+    @GetMapping("/fetch-rate-limit")
+    public Map<String, Object> fetchRateLimitConfig() {
+        return rateLimiterService.fetchRateLimitConfig();
     }
 }
